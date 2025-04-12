@@ -1,0 +1,112 @@
+---
+title: "MXN600 Assignment 1 SOAP"
+author: "Alex Conroy"
+date: "13 September 2020"
+output:
+html_document: default
+pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.align = "center", fig.width=8)
+```
+### Summary of Scenario
+
+This analysis was completed as a direct result of the incident that occurred in the South American holdings workplace. The outcome of this analysis will form part of the company’s response and inform changes to operational processes going forward in response to this recent incident and ensuing media coverage.
+
+
+### Research Questions
+
+The outcomes of this analysis aims to inform the answer to the following questions:
+
+1. Which regional safety regime should be implemented across the entire company based on the data given?
+2. Is there a positive relationship between a lack of workplace injuries and the experience of the worker?
+
+
+```{r Libraries-name, include=FALSE}
+library(ggstatsplot)
+library(tidyverse)
+library(MASS)
+library(ggpubr)
+library(DHARMa)
+library(AER)
+library(GGally)
+library(kableExtra)
+
+```
+### Summary of Available Data
+
+The available data originally presented with an injury counts, numerical experience levels, numerical safety regimes and the number of hours worked. This data was explored and reorganised to provide an injury per 100,000 hours worked rate, along with more appropriate categorical names for the safety regimes and experience levels.
+
+The combination of the injury and hours data was completed to neutralise the effects of the differing hours worked by workers of lesser experience type and regions. But also, to allow for the negating of both the covariate from the model, and the high correlation found between working more hours and injuries. A snapshot of this reformed data is displayed below. 
+ 
+
+```{r chunk-Load Data, echo=FALSE, include=FALSE}
+## Loading Data
+injury_original <- read.csv(file = "injury.csv")
+## Suppression of double index
+injury <- injury_original[,2:5]
+
+injury_data_recoded <- injury[,c("Injuries","Hours")]
+#Convert variables to factors:
+injury_data_recoded$Experience <- factor(injury$Experience,labels=c("None","Little","Some","Lots"))
+injury_data_recoded$Safety <- factor(injury$Safety,labels=c("Type1","Type2","Type3","Type4"))
+```
+
+
+
+```{r chunk-Alter Data, echo=FALSE}
+injury_data_recoded$InjuryPHour <- as.integer((injury_data_recoded$Injuries/injury_data_recoded$Hours)*100000)
+injury_data_recoded <- injury_data_recoded[c(3,4,5)]
+head(injury_data_recoded) %>%
+  kbl() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+```
+
+
+For this analysis, the hours worked to injuries sustained correlation will be handled with this combination rather than explored exclusively. This was done to focus on the specific answers posed. But it is recommended that a future analysis is undertaken to explore this.
+
+### Modeling Approach and Justification
+
+Given the data types provided the natural choice for the distribution for the model is Poisson distribution. A structurally optimised Poisson model was produced and run though appropriate residual and dispersion checks. From the results gleaned by these checks, the model was determined to be over dispersed and an alternative Negative Binomial model was created to overcome this. 
+
+Similarly, to the Poisson model, the NB model was run though structural optimisation and appropriate model confirmation testing; QQ plot and residual/predictions. 
+The results from these tests showed that the Negative Binomial model was the more appropriate choice and appropriate results were extracted to answer the provided questions. 
+
+### Summary and Recommendations
+
+For the question regarding safety regime. The intercept absorbed Safety Type 1 and looks to have a significant positive influence, while Type 2 has a slightly negative influence and all other types are non-significant in comparison. This indicated that safety regime Type 2 is the type of choice to implement company-wide.
+
+Looking towards the experience levels there is a trending larger negative affect on the number of injuries per hour, along with greater significance as the experience levels increase. This tends to suggest that there is merit to the Senior Management’s notion that some form of successful retention program will aid in reducing/preventing injuries.
+
+
+```{r chunk-outlier exploration boxplot, echo=FALSE, warning = FALSE}
+## Experience v Injuries
+p1 <- ggplot(data = injury_data_recoded,
+ mapping = aes(
+ x = Experience,
+ y = log(InjuryPHour),
+ )) +
+ geom_boxplot(outlier.shape=NA) +
+ theme(axis.text.x = element_text(angle = -45,vjust = 0,hjust = 0)) +
+ labs(title="Injuries Per Hour by Experience", x = "Levels of Experience",y = "Log Injuries per 100,000 Hour Worked")
+
+## Safety v Injuries
+p2 <- ggplot(data = injury_data_recoded,
+ mapping = aes(
+ x = Safety,
+ y = log(InjuryPHour),
+ )) +
+ geom_boxplot(outlier.shape=NA) +
+ theme(axis.text.x = element_text(angle = -45,vjust = 0,hjust = 0)) +
+ labs(title="Injuries Per Hour by Safety Program", x = "Safety Program",y = "Log Injuries per 100,000 Hour Worked")
+
+ggarrange(p1,p2,ncol = 2, nrow =1)
+ 
+```
+
+
+These results can be best visually summarized in the above boxplot. 
+
+
+

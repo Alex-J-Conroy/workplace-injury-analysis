@@ -1,0 +1,382 @@
+---
+title: "MXN600 Assignment 1"
+author: "Alex Conroy"
+date: "13 September 2020"
+output:
+html_document: default
+pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.align = "center", fig.width=8)
+```
+# Introduction
+
+The purpose of this report is to analyse workplace injury data from across the various production networks within the company. The outcome from this analysis will form part of the company’s response and operational processes going forward in response to the recent workplace accidents and ensuing media coverage. 
+
+The outcomes of this analysis aim to inform the answer to the following questions:
+
+1. Which regional safety regime should be implemented across the entire company based on the data given?
+2. Is there a positive relationship between a lack of workplace injuries and the experience of the worker? 
+
+
+```{r Libraries-name, include=FALSE}
+library(ggstatsplot)
+library(tidyverse)
+library(MASS)
+library(ggpubr)
+library(DHARMa)
+library(AER)
+library(GGally)
+library(kableExtra)
+
+```
+### The Data
+
+To begin with the data that was available on company-wide accidents was collated and presented as a CSV file. 
+
+```{r chunk-Load Data, echo=FALSE}
+## Loading Data
+injury_original <- read.csv(file = "injury.csv")
+## Suppression of double index
+injury <- injury_original[,2:5]
+
+head(injury) %>%
+  kbl() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+
+```
+
+
+Shown above it consists of count type data of injuries sustained and the hours taken for the to occur, along with factorial type data depicting what type of safety regimes was in place, and the experience level of the worker(s) injured.
+
+
+```{r}
+summary(injury) %>%
+  kbl() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+```
+
+Additional information can be gleaned from the summary information of the data. But this is limited by both the Safety and Experience columns being factorised data that is currently being displayed as an integer.
+
+# Initial Exploration
+
+
+Before commencing any material works, a general correlation plot of all the data was produced, shown below. This was done to get a general feel for the data along with a first look into any potential correlations between injuries and the other data.
+
+
+
+```{r chunk-parplot, echo=FALSE, fig.width=11}
+## Initial plot to view data interactions
+ggpairs(injury)+
+ labs(title="Data Correlation Matrix")
+```
+
+
+
+The plot appears to give some interesting insights. There is a distinct, reasonably linear relationship between Injuries and Hours, with quite a high correlation score. This seems to imply that the more hours a worker completes, the more likely they are to case an injury.  There also appears to be evidence that safety types 3 and 4 do not mitigate injuries as effectively as 1 and 2. Interestingly at this stage there appears to also be evidence that those with the least experienced [1] are the least prone to injury. However, this is dampened by the relationship between Hours and Injuries.
+
+### Data Recoding
+
+Before delving into further analysis and finally modelling, firstly the factorised data needs to be re-coded. This will change the experience level to be 'None' for 1, 'Little' for 2, 'Some' for 3 and, 'Lots' for 4. Similarly, the word 'Type' has been placed before the Safety data numbers to help differentiate them from other data within the set.
+
+
+```{r chunk-Recoding, echo=FALSE}
+injury_data_recoded <- injury[,c("Injuries","Hours")]
+#Convert variables to factors:
+injury_data_recoded$Experience <- factor(injury$Experience,labels=c("None","Little","Some","Lots"))
+injury_data_recoded$Safety <- factor(injury$Safety,labels=c("Type1","Type2","Type3","Type4"))
+summary(injury_data_recoded) %>%
+  kbl() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+```
+
+
+This also provides an at-a-glance investigation of the spread of the data across the different factorised types. While there are a few less 'Little' and 'Some' experience factors, the data appears to be fairly even.
+
+### Secondary Exploration
+
+With the initial exploration complete, the data can be focused down to the data points of interest. Where the exploration can drill down into the data behaviour before modelling. 
+
+A box plot of the injuries count and the factors of experience and safety, along with a scatter plot of injures and hours coloured by the factors is shown below.
+
+
+
+```{r chunk-Further Data Exploration, echo=FALSE, message=FALSE}
+## Experience v Injuries
+p1 <- ggplot(data = injury_data_recoded,
+ mapping = aes(
+ x = Experience,
+ y = Injuries,
+ )) +
+ geom_boxplot() +
+ theme(axis.text.x = element_text(angle = -45,vjust = 0,hjust = 0)) +
+ labs(title="Injuries by Experience", x = "Levels of Experience",y = "Number of Injuries")
+
+## Safety v Injuries
+p2 <- ggplot(data = injury_data_recoded,
+ mapping = aes(
+ x = Safety,
+ y = Injuries,
+ )) +
+ geom_boxplot() +
+ theme(axis.text.x = element_text(angle = -45,vjust = 0,hjust = 0)) +
+ labs(title="Injuries by Safety Program", x = "Safety Program",y = "Number of Injuries")
+
+## Injuries v Hours w/ Experience
+p3 <- ggplot(data = injury_data_recoded,
+ mapping = aes(
+ x = Hours,
+ y = Injuries,
+ ))+geom_point(aes( color = Experience)) +
+  scale_color_manual(values = c("#00AFBB", "#E7B800", "#FC4E07","#52854C"))+geom_smooth(method = "lm", se = FALSE)+labs(title="Injuries by Time Worked with Experience")
+
+## Injuries v Hours w/ Safety
+p4 <- ggplot(data = injury_data_recoded,
+ mapping = aes(
+ x = Hours,
+ y = Injuries,
+ ))+geom_point(aes( color = Safety)) +
+  scale_color_manual(values = c("#00AFBB", "#E7B800", "#FC4E07","#52854C"))+geom_smooth(method = "lm", se = FALSE)+labs(title="Injuries by Time Worked with Safety")
+
+ ggarrange(
+ ggarrange(p1,p2,ncol = 1, nrow = 2),
+ ggarrange(p3,p4, ncol = 1, nrow = 2),
+ ncol = 2
+ )
+
+
+```
+
+
+These graphs look to determine answer two different questions within the analysis. The first is the base questions, how do the experience levels and safety programs compare. The second is to further explore the affect hours worked will have on the analysis, to determine if it is necessary to nullify or handle any effects occurring. 
+
+While the box plots do appear to reveal some interesting comparisons. The scatter plots show significant groupings of certain factors around the lower hours. These are all the factors mentioned in the correlation analysis as showing promise as potential answers to the questions posed. This will require the hours data to be transformed in order to determine any causes of injuries outside of hours worked. 
+
+
+### Data Alteration
+
+The chosen method to handle the transformation is to combine the injuries and hours data into a singular injuries per hour metric. For ease or readability this has been changed to injuries per 100,000 hours worked.
+
+
+```{r chunk-Alter Data, echo=FALSE}
+injury_data_recoded$InjuryPHour <- as.integer((injury_data_recoded$Injuries/injury_data_recoded$Hours)*100000)
+injury_data_recoded <- injury_data_recoded[c(3,4,5)]
+head(injury_data_recoded) %>%
+  kbl() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+```
+
+
+### Outlier Identification and Handling
+
+
+As a final point of exploration another box plot has been produced of the factors for experience and safety programs against the injuries per hour metric. To aid in readability and deal with the slight non-linearity observed in the correlation matrix the injuries per hour was provided on a log scale. 
+
+
+```{r chunk-outlier exploration boxplot, echo=FALSE, warning = FALSE}
+## Experience v Injuries
+p1 <- ggplot(data = injury_data_recoded,
+ mapping = aes(
+ x = Experience,
+ y = log(InjuryPHour),
+ )) +
+ geom_boxplot() +
+ theme(axis.text.x = element_text(angle = -45,vjust = 0,hjust = 0)) +
+ labs(title="Injuries Per Hour by Experience", x = "Levels of Experience",y = "Log Injuries per 100,000 Hour Worked")
+
+## Safety v Injuries
+p2 <- ggplot(data = injury_data_recoded,
+ mapping = aes(
+ x = Safety,
+ y = log(InjuryPHour),
+ )) +
+ geom_boxplot() +
+ theme(axis.text.x = element_text(angle = -45,vjust = 0,hjust = 0)) +
+ labs(title="Injuries Per Hour by Safety Program", x = "Safety Program",y = "Log Injuries per 100,000 Hour Worked")
+
+ggarrange(p1,p2,ncol = 2, nrow =1)
+ 
+```
+
+This view appears to solidify the idea that the number of hours worked was interfering with the analysis, as there is now a flip of the factors for experience for 'None' and 'Little' now appearing to be some of the most injury intensive levels. Things are a little less cut and dry with the safety programs. However, both type 1 and 2 appear to be slightly favoured as safer. The last data cleaning that this visualisation makes clear needs to occur before modelling is the handling of outliers. For this analysis anything that sits beyond the outer quantiles of the box plot will be identified and removed. 
+
+```{r chunk-outlier ID and Handling, echo=FALSE}
+outliers <- boxplot(injury_data_recoded$InjuryPHour ~ injury_data_recoded$Experience, plot=FALSE)$out
+
+injury_data_recoded <- injury_data_recoded[-which(injury_data_recoded$InjuryPHour %in% outliers),]
+```
+
+```{r chunk-Outlier Handling Confirmation, echo=FALSE}
+boxplot(injury_data_recoded$InjuryPHour ~ injury_data_recoded$Experience, main="Injuries by Experience Type with outlier handled ",
+   xlab="Levels of Experience", ylab="Injuries per 100,000 Hour Worked")
+
+```
+
+Through both visual and numeric analysis there are 3 outliers that were identified and excluded from the modelling process. A new representation of the plot after this process was completed is shown above. 
+
+
+# Modelling
+
+As the data that is under analysis in this model is count type data that is related to an exposure time (100,000 hours). The natural choice for the distribution for the model is Poisson distribution. This choice is backed by the earlier decision to view the data in a log-linear fashion. The analysis will also look at the Negative Binomial model for a more general alternative to the Poisson. 
+
+## Poisson
+
+The model was run both forwards and backwards, with the relationship of both safety and experience modelled against injury per hour. With the $\lambda$ set as the injury per hour rate. 
+
+
+```{r chunk-Poisson, echo=FALSE}
+#Full model with all possible interactions for backwards selection:
+full_interaction_model <- glm(data = injury_data_recoded,
+ formula = InjuryPHour ~ Safety * Experience,
+ family = poisson(link = "log"))
+
+#Model with no variables present for forwards selection:
+null_model <- glm(data = injury_data_recoded,
+ formula = InjuryPHour ~ .,
+ family = poisson(link = "log"))
+
+#Perform backward and forward selection:
+backward_sel_model <- stepAIC(
+ full_interaction_model,direction = "backward",trace = 0)
+forward_sel_model <- stepAIC(
+ null_model,
+ scope = . ~ .^3, ## Allows forward selection to propose up to 3-way interaction.
+ direction = "forward",
+ trace = 0) ## trace = 0 prevents automatic output of step AIC function.
+
+#Inspect models:
+backward_sel_model$formula
+## InjuryPHour ~ Safety + Experience
+forward_sel_model$formula
+## InjuryPHour ~ Experience + Safety
+AIC(backward_sel_model)
+## 411.8331
+AIC(forward_sel_model)
+## 411.8331
+```
+
+The AIC was then run against both model estimate parameter structures, with both producing the same number. This indicates that the overall structure for this model does not affected the maximum likelihood and the analysis can proceed with either. 
+
+
+### Residuals
+
+Because we are using a Poisson distribution and a generalised linear model, it isn't possible to produce a standard QQ plot and residual comparison. To achieve this the DHARMa library will be used to create a QQ plot that is against a simulated expected distribution of the values from the fitted model. 
+
+```{r chunk-Poisson Resid, echo=FALSE}
+#Simulate residuals from the model:
+poisson_residuals = simulateResiduals(backward_sel_model)
+#Plot observed quantile versus expected quantile to assess distribution fit, and predicted value versus standardised residuals for unmodelled pattern in the residuals.
+plot(poisson_residuals)
+
+```
+
+
+For the QQ plot on the left we can see that the data does not sit particularly well along the expected line, and that we are receiving a warning from the dispersion test indicating significant deviation. 
+
+For the residuals v predicted values, the ideal outcome would have the lines sit completely vertical. In this case there looks to be a reasonably significant positive slope to the data at the 0.5 and 0.75 quartiles and a shallow downwards concave at the 0.25 quartile. Additionally, there are two data points that have been flagged.  
+
+
+### Overdispersion
+
+Lastly, the model will be checked for overdispersion. This will look to see if there is any additional uncertainty in the test rate.
+
+
+```{r chunk-Poisson Overdispersion, echo=FALSE} 
+disp_result <- dispersiontest(backward_sel_model)
+print(disp_result)
+```
+
+The AER overdispersion test functions as a hypothesis test, where $H_0$ $=$ 0 and $H_1$ $\neq$ 0. Where a c $<$ 0 will indicate underdispersion and c $>$ 0 will indicate overdispersion. Here there is evidence of overdispersion.
+
+This indicated that a potential better choice of distribution for the model is a Negative Binomial distribution, as it can handle overdispersion much better than the Poisson distribution.
+
+### P-Values
+
+
+Below are the p-values for the Poisson distribution model. But for now, these will be ignored in favour of building and testing a Negative Binomial model. 
+
+
+```{r chunk-Poisson P-values, echo=FALSE}
+#Adjust p-values for multiple testing:
+adjusted_p_values_pois <- p.adjust(summary(backward_sel_model)$coefficients[,4])
+
+adjusted_p_values_pois <- format(adjusted_p_values_pois, digits = 3)
+adjusted_p_values_pois%>%
+  kbl() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+
+ 
+```
+## Negative Binomial
+
+Negative Binomial (NB) regression is a often used as a generalised version of the Poisson distribution. It essentially negates the assumption found in the Poisson regression that the variance must be equal to the mean. Because of this change the model created using NB regression will be able to ignore the equi-dispersion assumption and hopefully provide a better fitted model. 
+
+
+```{r chunk-Negative Binomial, echo=FALSE}
+#Specify full and null models:
+NB_full_model <- glm.nb(data = injury_data_recoded,
+ formula = InjuryPHour ~ Safety * Experience,
+ link = "log")
+NB_null_model <- glm.nb(data = injury_data_recoded,
+ formula = InjuryPHour ~ .,
+ link = "log")
+#Perform backward and forward selection:
+NB_backward_sel_model <- stepAIC(object = NB_full_model,direction = "backward",trace = 0)
+NB_forward_sel_model <- stepAIC(NB_null_model,scope = . ~ .^3, direction = "forward",trace =
+0)
+#Inspect models:
+formula(NB_backward_sel_model)
+## InjuryPHour ~ Safety + Experience
+formula(NB_forward_sel_model)
+## InjuryPHour ~ Experience + Safety
+AIC(NB_backward_sel_model) #[1] 400.3561
+AIC(NB_forward_sel_model) #[1] 400.3561
+```
+
+
+Similarly, to the Poisson model, the NB model was run in both a forwards and backwards motion to determine the best structure for the given parameters. 
+
+The resulting AIC test produced identical outputs like the Poisson model, but with a slightly improved score. Again, indicating that the order of Safety and Experience doesn't matter in this case.
+
+### Residuals 
+
+Using the same library as before the QQ plot and residual comparison can be seen below. The QQ plot visually appears quite similar to the Poisson model, if a little more linear. But the dispersion test along with KS and outlier tests indicate no significant scores have been flagged. 
+
+
+```{r chunk-Negative Binomial Residuals, echo=FALSE}
+#Simulate residuals from the model:
+NB_residuals = simulateResiduals(NB_backward_sel_model)
+#Plot observed quantile versus expected quantile to assess distribution fit, and predicted value versus standardised residuals for unmodeled pattern in the residuals.
+plot(NB_residuals)
+```
+
+
+Looking at the residual predicted comparisons there appears to be an improvement in the 0.75 and 0.5 quartile lines that are much closer to the horizontal, with a still curved 0.25 quartile line, that has at least moved to be more centred around the 0.25. 
+
+### Summary and Findings
+
+With the model appearing to be a better fit for the data the final results will be derived from the NB distribution.
+
+
+```{r chunk-NB Summary, echo=FALSE}
+summary(NB_backward_sel_model)
+```
+
+
+Looking to the summary for indication of the answers to the analysis questions. It can be seen that the intercept has absorbed Safety Type 1 and looks to have a significant positive influence, while Type 2 has a slightly negative influence and all other types are non-significant in comparison.
+
+
+```{r chunk-NB p-values, echo=FALSE}
+#Adjust p-values for multiple testing:
+adjusted_p_values <- p.adjust(summary(NB_backward_sel_model)$coefficients[,4])
+
+adjusted_p_values <- format(adjusted_p_values, digits = 3)
+adjusted_p_values%>%
+  kbl() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+
+```
+
+
+Looking towards the experience levels there is a trending larger negative affect on the number of injuries per hour, along with greater significance as the experience levels increase. This tends to suggest that there is merit to the Senior Management's notion that some form of successful retention program will aid in reducing/preventing injuries.
